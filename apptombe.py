@@ -78,11 +78,53 @@ def calculate_coupon_dates(row):
 st.sidebar.header("Contrôles")
 uploaded_file = st.sidebar.file_uploader("Télécharger un fichier Excel", type=["xlsx"])
 
-if st.sidebar.button("1. Charger les données") and uploaded_file is not None:
+if st.sidebar.button("1. Charger et prétraiter les données") and uploaded_file is not None:
     try:
-        st.session_state.raw_data = pd.read_excel(uploaded_file)
-        st.session_state.step = 1
-        st.sidebar.success("Données chargées!")
+        # Charger les données
+        df = pd.read_excel(uploaded_file)
+        
+        # Appliquer le prétraitement
+        # Dictionnaire de renommage des colonnes
+        renommage = {
+            'Code ISIN': 'INSTRID',
+            'Maturité': 'Maturite',
+            'Date d\'émission': 'ISSUEDT',
+            'Date d\'échéance': 'MATURITYDT_L',
+            'Taux Nominal %': 'INTERESTRATE',
+            'Valeur Nominale': 'PARVALUE',
+            'Prix Pied de Coupon %': 'PrixPieddeCoupon%',
+            'Coupon Couru Unitaire': 'CouponCouruUnitaire',
+        }
+
+        # Renommer les colonnes
+        df.rename(columns=renommage, inplace=True)
+
+        # Convertir les colonnes en numériques pour les calculs
+        df['Encours'] = pd.to_numeric(df['Encours'].astype(str).str.replace(' ', '').str.replace(',', '.'), errors='coerce')
+        df['PARVALUE'] = pd.to_numeric(df['PARVALUE'].astype(str).str.replace(' ', '').str.replace(',', '.'), errors='coerce')
+
+        # Ajouter la colonne ISSUESIZE : Encours / PARVALUE
+        df['ISSUESIZE'] = df['Encours'] / df['PARVALUE']
+
+        # Ajouter la colonne INTERESTPERIODCTY avec la logique conditionnelle basée sur 'Maturite'
+        def determine_periodicity(maturite):
+            maturite_str = str(maturite).lower()
+            if 'ans' in maturite_str or '52 semaines' in maturite_str:
+                return 'ANLY'
+            elif '26 semaines' in maturite_str:
+                return 'HFLY'
+            elif '13 semaines' in maturite_str:
+                return 'QTLY'
+            else:
+                return 'ANLY'  # Valeur par défaut
+
+        df['INTERESTPERIODCTY'] = df['Maturite'].apply(determine_periodicity)
+        
+        # Stocker les données prétraitées
+        st.session_state.raw_data = df
+        st.session_state.step = 2
+        st.sidebar.success("Chargement et prétraitement réussis!")
+        
     except Exception as e:
         st.sidebar.error(f"Erreur: {str(e)}")
 
@@ -131,7 +173,7 @@ if st.sidebar.button("3. Calculer les coupons") and st.session_state.step >= 2:
         max_coupons = max(df["CouponPayDate"].apply(len)) if not df["CouponPayDate"].empty else 0
         for i in range(max_coupons):
             df[f"CouponPayDate_{i+1}"] = df["CouponPayDate"].apply(lambda x: x[i] if i < len(x) else pd.NaT)
-            df[f"CouponAmount_{i+1}"] = df.apply(lambda row: calculate_coupon_amount(row, row[f"CouponPayDate_{i+1}"]), axis=1)
+            df[f"CouponAmount_{i+1}"] = df.apply(lambda row: calculate_coupon_amount(row, row[f"CoutonPayDate_{i+1}"]), axis=1)
         
         date_cols = [col for col in df.columns if "CouponPayDate" in col]
         for col in date_cols:
@@ -206,7 +248,7 @@ if st.sidebar.button("4. Analyser les résultats") and st.session_state.step >= 
                     }
                 
                 results[month_year]['total_coupons'] += amount
-                results[month_year]['coupon_instruments'].add(row['INSTRID'])
+                results[month_year]['couton_instruments'].add(row['INSTRID'])
 
                 coupon_date = None
                 for i in range(1, 32):
@@ -645,4 +687,3 @@ if st.session_state.step >= 3:
 # Message initial
 if st.session_state.step == 0:
     st.info("Veuillez télécharger un fichier Excel et suivre les étapes du processus.")
-
