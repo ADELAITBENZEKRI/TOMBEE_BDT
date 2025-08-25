@@ -11,7 +11,7 @@ import re
 st.set_page_config(page_title="Tableau de Bord d'Analyse des BDT", layout="wide")
 
 # Titre
-st.title("Tableau de Bord d'Analyse des Obligations")
+st.title("Tableau de Bord d'Analyse des BDT")
 
 # Initialisation de l'état de la session
 if 'raw_data' not in st.session_state:
@@ -86,7 +86,12 @@ def preprocess_bond_data(df):
         if col in df_processed.columns:
             df_processed[col] = df_processed[col].apply(clean_numeric_value)
     
-
+    # Ajout de la colonne ISSUESIZE (Encours / PARVALUE)
+    if 'ENCOURS' in df_processed.columns and 'PARVALUE' in df_processed.columns:
+        df_processed['ISSUESIZE'] = df_processed['ENCOURS'] / df_processed['PARVALUE']
+    else:
+        st.warning(f"Colonnes manquantes pour calculer ISSUESIZE: ENCOURS={ 'ENCOURS' in df_processed.columns}, PARVALUE={ 'PARVALUE' in df_processed.columns}")
+    
     # Ajout de la colonne INTERESTPERIODCTY basée sur la maturité
     def determine_interest_period(maturite):
         if pd.isna(maturite):
@@ -745,5 +750,6 @@ if st.session_state.step >= 2:
 # Message initial
 if st.session_state.step == 0:
     st.info("Veuillez télécharger un fichier Excel et suivre les étapes du processus.")
+
 
 
