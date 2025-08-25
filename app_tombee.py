@@ -5,6 +5,7 @@ import calendar
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from io import BytesIO
+import re
 
 # Configuration de la page
 st.set_page_config(page_title="Tableau de Bord d'Analyse des BDT", layout="wide")
@@ -25,7 +26,7 @@ if 'raw_results' not in st.session_state:
     st.session_state.raw_results = None
 if 'instruments_details' not in st.session_state:
     st.session_state.instruments_details = None
-####
+
 # Fonction de prétraitement
 def preprocess_bond_data(df):
     """
@@ -87,7 +88,6 @@ def preprocess_bond_data(df):
     
     return df_processed
 
-######
 # Fonctions utilitaires
 def number_to_text(value):
     value = abs(value)
@@ -140,38 +140,40 @@ def calculate_coupon_dates(row):
 st.sidebar.header("Contrôles")
 uploaded_file = st.sidebar.file_uploader("Télécharger un fichier Excel", type=["xlsx"])
 
-if st.sidebar.button("1. Charger les données") and uploaded_file is not None:
+if st.sidebar.button("1. Charger et prétraiter les données") and uploaded_file is not None:
     try:
+        # Chargement des données
         st.session_state.raw_data = pd.read_excel(uploaded_file)
-        st.session_state.step = 1
-        st.sidebar.success("Données chargées!")
-    except Exception as e:
-        st.sidebar.error(f"Erreur: {str(e)}")
-
-if st.sidebar.button("2. Prétraiter les données") and st.session_state.step >= 1:
-    try:
-        df = st.session_state.raw_data.copy()
+        
+        # Prétraitement des données
+        st.session_state.processed_data = preprocess_bond_data(st.session_state.raw_data)
+        
+        # Vérification des colonnes requises
         required_cols = ['INSTRID', 'ISSUEDT', 'MATURITYDT_L', 'INTERESTPERIODCTY', 'ISSUESIZE', 'INTERESTRATE']
-        missing = [col for col in required_cols if col not in df.columns]
+        missing = [col for col in required_cols if col not in st.session_state.processed_data.columns]
         
         if missing:
-            st.sidebar.error(f"Colonnes manquantes: {', '.join(missing)}")
+            st.sidebar.error(f"Colonnes manquantes après prétraitement: {', '.join(missing)}")
         else:
             # Suppression des doublons basée sur INSTRID (garder la première occurrence)
-            df = df.drop_duplicates(subset=['INSTRID'], keep='first')
+            st.session_state.processed_data = st.session_state.processed_data.drop_duplicates(subset=['INSTRID'], keep='first')
             
             # Conversion des types de données
-            df['MATURITYDT_L'] = pd.to_datetime(df['MATURITYDT_L'], errors='coerce')
-            df['ISSUEDT'] = pd.to_datetime(df['ISSUEDT'], errors='coerce')
-            df['ISSUESIZE'] = pd.to_numeric(df['ISSUESIZE'], errors='coerce') * 100_000
+            st.session_state.processed_data['MATURITYDT_L'] = pd.to_datetime(st.session_state.processed_data['MATURITYDT_L'], errors='coerce')
+            st.session_state.processed_data['ISSUEDT'] = pd.to_datetime(st.session_state.processed_data['ISSUEDT'], errors='coerce')
+            st.session_state.processed_data['ISSUESIZE'] = pd.to_numeric(st.session_state.processed_data['ISSUESIZE'], errors='coerce') * 100_000
             
-            st.session_state.processed_data = df
             st.session_state.step = 2
-            st.sidebar.success("Prétraitement réussi! Doublons supprimés.")
+            st.sidebar.success("Chargement et prétraitement réussis! Doublons supprimés.")
+            
+            # Aperçu des données prétraitées
+            st.subheader("Aperçu des données prétraitées")
+            st.dataframe(st.session_state.processed_data.head(), use_container_width=True)
+            
     except Exception as e:
         st.sidebar.error(f"Erreur: {str(e)}")
 
-if st.sidebar.button("3. Calculer les coupons") and st.session_state.step >= 2:
+if st.sidebar.button("2. Calculer les coupons") and st.session_state.step >= 2:
     try:
         df = st.session_state.processed_data.copy()
         df["CouponPayDate"] = df.apply(calculate_coupon_dates, axis=1)
@@ -193,7 +195,7 @@ if st.sidebar.button("3. Calculer les coupons") and st.session_state.step >= 2:
         max_coupons = max(df["CouponPayDate"].apply(len)) if not df["CouponPayDate"].empty else 0
         for i in range(max_coupons):
             df[f"CouponPayDate_{i+1}"] = df["CouponPayDate"].apply(lambda x: x[i] if i < len(x) else pd.NaT)
-            df[f"CouponAmount_{i+1}"] = df.apply(lambda row: calculate_coupon_amount(row, row[f"CouponPayDate_{i+1}"]), axis=1)
+            df[f"CouponAmount_{i+1}"] = df.apply(lambda row: calculate_coupon_amount(row, row[f"CoutonPayDate_{i+1}"]), axis=1)
         
         date_cols = [col for col in df.columns if "CouponPayDate" in col]
         for col in date_cols:
@@ -205,7 +207,7 @@ if st.sidebar.button("3. Calculer les coupons") and st.session_state.step >= 2:
     except Exception as e:
         st.sidebar.error(f"Erreur: {str(e)}")
 
-if st.sidebar.button("4. Analyser les résultats") and st.session_state.step >= 3:
+if st.sidebar.button("3. Analyser les résultats") and st.session_state.step >= 3:
     try:
         df = st.session_state.processed_data.copy()
         
@@ -308,15 +310,15 @@ if st.sidebar.button("4. Analyser les résultats") and st.session_state.step >= 
 st.sidebar.header("État du processus")
 steps = [
     "🟠 En attente de données",
-    "✅ Données chargées | 🔴 Prétraitement nécessaire",
-    "✅ Données chargées | ✅ Données prétraitées | 🔴 Calcul des coupons nécessaire",
-    "✅ Données chargées | ✅ Données prétraitées | ✅ Coupons calculés | 🔴 Analyse nécessaire",
-    "✅ Données chargées | ✅ Données prétraitées | ✅ Coupons calculés | ✅ Analyse terminée"
+    "🔴 Prétraitement nécessaire",
+    "✅ Données prétraitées | 🔴 Calcul des coupons nécessaire",
+    "✅ Données prétraitées | ✅ Coupons calculés | 🔴 Analyse nécessaire",
+    "✅ Données prétraitées | ✅ Coupons calculés | ✅ Analyse terminée"
 ]
 st.sidebar.info(steps[st.session_state.step])
 
 # Recherche d'instrument par INSTRID
-if st.session_state.step >= 3:
+if st.session_state.step >= 2:
     st.header("🔍 Recherche d'instrument")
     
     search_instr = st.text_input("Entrez l'INSTRID de l'instrument à rechercher:")
@@ -330,13 +332,14 @@ if st.session_state.step >= 3:
             st.subheader(f"Résultats pour: {search_instr}")
             st.dataframe(instrument_data, use_container_width=True)
             
-            # Afficher les dates de coupon spécifiques
-            coupon_cols = [col for col in instrument_data.columns if "CouponPayDate" in col or "CouponAmount" in col]
-            if coupon_cols:
-                coupon_data = instrument_data[coupon_cols].transpose().reset_index()
-                coupon_data.columns = ['Colonne', 'Valeur']
-                st.subheader("Détails des coupons")
-                st.dataframe(coupon_data, use_container_width=True)
+            # Afficher les dates de coupon spécifiques si disponibles
+            if st.session_state.step >= 3:
+                coupon_cols = [col for col in instrument_data.columns if "CouponPayDate" in col or "CouponAmount" in col]
+                if coupon_cols:
+                    coupon_data = instrument_data[coupon_cols].transpose().reset_index()
+                    coupon_data.columns = ['Colonne', 'Valeur']
+                    st.subheader("Détails des coupons")
+                    st.dataframe(coupon_data, use_container_width=True)
         else:
             st.warning(f"Aucun instrument trouvé avec INSTRID contenant '{search_instr}'")
 
@@ -580,7 +583,7 @@ if st.session_state.step >= 4:
             st.warning("Aucun détail d'instrument disponible. Veuillez relancer l'analyse.")
 
 # Téléchargement des données
-if st.session_state.step >= 3:
+if st.session_state.step >= 2:
     st.header("📥 Téléchargement des données")
     
     @st.cache_data
@@ -706,6 +709,4 @@ if st.session_state.step >= 3:
 
 # Message initial
 if st.session_state.step == 0:
-
     st.info("Veuillez télécharger un fichier Excel et suivre les étapes du processus.")
-
