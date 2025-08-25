@@ -5,6 +5,7 @@ import calendar
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from io import BytesIO
+import numpy as np
 
 # Configuration de la page
 st.set_page_config(page_title="Tableau de Bord d'Analyse des BDT", layout="wide")
@@ -39,10 +40,32 @@ def number_to_text(value):
 def format_amount(value):
     return f"{value:,.2f} ({number_to_text(value)})"
 
+def determine_interest_periodicity(maturity_text):
+    """Détermine la périodicité des intérêts basée sur le texte de maturité"""
+    if pd.isna(maturity_text):
+        return "ANLY"
+    
+    maturity_text = str(maturity_text).lower()
+    
+    if "année" in maturity_text or "ans" in maturity_text or "an" in maturity_text:
+        return "ANLY"
+    elif "semaine" in maturity_text or "semaines" in maturity_text:
+        if "26" in maturity_text:
+            return "HFLY"
+        elif "13" in maturity_text:
+            return "QTLY"
+        elif "52" in maturity_text:
+            return "ANLY"
+    elif "trimestre" in maturity_text:
+        return "QTLY"
+    
+    # Par défaut, on considère que c'est annuel
+    return "ANLY"
+
 def calculate_coupon_dates(row):
     try:
-        issue_date = pd.to_datetime(row["ISSUEDT"], errors='coerce')
-        maturity_date = pd.to_datetime(row["MATURITYDT_L"], errors='coerce')
+        issue_date = pd.to_datetime(row["Date d'émission"], errors='coerce')
+        maturity_date = pd.to_datetime(row["Date d'échéance"], errors='coerce')
         
         if pd.isna(issue_date) or pd.isna(maturity_date):
             return [maturity_date]
@@ -71,7 +94,7 @@ def calculate_coupon_dates(row):
 
         return coupon_dates
     except Exception as e:
-        st.error(f"Erreur pour l'instrument {row.get('INSTRID', 'inconnu')}: {str(e)}")
+        st.error(f"Erreur pour l'instrument {row.get('Code ISIN', 'inconnu')}: {str(e)}")
         return [maturity_date]
 
 # Interface utilisateur
@@ -89,19 +112,34 @@ if st.sidebar.button("1. Charger les données") and uploaded_file is not None:
 if st.sidebar.button("2. Prétraiter les données") and st.session_state.step >= 1:
     try:
         df = st.session_state.raw_data.copy()
-        required_cols = ['INSTRID', 'ISSUEDT', 'MATURITYDT_L', 'INTERESTPERIODCTY', 'ISSUESIZE', 'INTERESTRATE']
+        
+        # Vérifier les colonnes requises
+        required_cols = ['Code ISIN', "Date d'émission", "Date d'échéance", 'Encours', 'Taux Nominal %', 'Valeur Nominale']
         missing = [col for col in required_cols if col not in df.columns]
         
         if missing:
             st.sidebar.error(f"Colonnes manquantes: {', '.join(missing)}")
         else:
-            # Suppression des doublons basée sur INSTRID (garder la première occurrence)
-            df = df.drop_duplicates(subset=['INSTRID'], keep='first')
+            # Suppression des doublons basée sur Code ISIN (garder la première occurrence)
+            df = df.drop_duplicates(subset=['Code ISIN'], keep='first')
             
             # Conversion des types de données
-            df['MATURITYDT_L'] = pd.to_datetime(df['MATURITYDT_L'], errors='coerce')
-            df['ISSUEDT'] = pd.to_datetime(df['ISSUEDT'], errors='coerce')
-            df['ISSUESIZE'] = pd.to_numeric(df['ISSUESIZE'], errors='coerce') * 100_000
+            df["Date d'échéance"] = pd.to_datetime(df["Date d'échéance"], errors='coerce')
+            df["Date d'émission"] = pd.to_datetime(df["Date d'émission"], errors='coerce')
+            
+            # Nettoyer et convertir les colonnes numériques
+            df['Encours'] = df['Encours'].replace({',': '.'}, regex=True).astype(float)
+            df['Taux Nominal %'] = df['Taux Nominal %'].replace({',': '.'}, regex=True).astype(float)
+            df['Valeur Nominale'] = df['Valeur Nominale'].replace({',': '.'}, regex=True).astype(float)
+            
+            # Calculer ISSUESIZE = Encours / Valeur Nominale * 100000
+            df['ISSUESIZE'] = (df['Encours'] / df['Valeur Nominale']) * 100000
+            
+            # Déterminer la périodicité des intérêts
+            df['INTERESTPERIODCTY'] = df['Maturité'].apply(determine_interest_periodicity)
+            
+            # Ajouter la colonne INTERESTRATE
+            df['INTERESTRATE'] = df['Taux Nominal %']
             
             st.session_state.processed_data = df
             st.session_state.step = 2
@@ -166,7 +204,7 @@ if st.sidebar.button("4. Analyser les résultats") and st.session_state.step >= 
         instruments_details = {}
         
         for _, row in df.iterrows():
-            maturity_date = row['MATURITYDT_L']
+            maturity_date = row["Date d'échéance"]
             if pd.notna(maturity_date):
                 month_year = (maturity_date.month, maturity_date.year)
                 issue_size = row['ISSUESIZE'] if pd.notna(row['ISSUESIZE']) else 0
@@ -184,11 +222,11 @@ if st.sidebar.button("4. Analyser les résultats") and st.session_state.step >= 
                     }
                 
                 results[month_year]['total_issuesize'] += issue_size
-                results[month_year]['instruments'].add(row['INSTRID'])
+                results[month_year]['instruments'].add(row['Code ISIN'])
                 instruments_details[month_year]['maturity_instruments'].append({
-                    'INSTRID': row['INSTRID'],
+                    'Code ISIN': row['Code ISIN'],
                     'ISSUESIZE': issue_size,
-                    'MATURITYDT': maturity_date.strftime('%d-%m-%Y')
+                    "Date d'échéance": maturity_date.strftime('%d-%m-%Y')
                 })
             
             coupons = get_coupons_by_month_year(row)
@@ -206,7 +244,7 @@ if st.sidebar.button("4. Analyser les résultats") and st.session_state.step >= 
                     }
                 
                 results[month_year]['total_coupons'] += amount
-                results[month_year]['coupon_instruments'].add(row['INSTRID'])
+                results[month_year]['coupon_instruments'].add(row['Code ISIN'])
 
                 coupon_date = None
                 for i in range(1, 32):
@@ -221,7 +259,7 @@ if st.sidebar.button("4. Analyser les résultats") and st.session_state.step >= 
                             continue
 
                 instruments_details[month_year]['coupon_instruments'].append({
-                    'INSTRID': row['INSTRID'],
+                    'Code ISIN': row['Code ISIN'],
                     'CouponAmount': amount,
                     'CouponDate': coupon_date
                 })
@@ -253,15 +291,15 @@ steps = [
 ]
 st.sidebar.info(steps[st.session_state.step])
 
-# Recherche d'instrument par INSTRID
+# Recherche d'instrument par Code ISIN
 if st.session_state.step >= 3:
     st.header("🔍 Recherche d'instrument")
     
-    search_instr = st.text_input("Entrez l'INSTRID de l'instrument à rechercher:")
+    search_instr = st.text_input("Entrez le Code ISIN de l'instrument à rechercher:")
     
     if search_instr and st.session_state.processed_data is not None:
         instrument_data = st.session_state.processed_data[
-            st.session_state.processed_data['INSTRID'].astype(str).str.contains(search_instr, case=False)
+            st.session_state.processed_data['Code ISIN'].astype(str).str.contains(search_instr, case=False)
         ]
         
         if not instrument_data.empty:
@@ -276,7 +314,7 @@ if st.session_state.step >= 3:
                 st.subheader("Détails des coupons")
                 st.dataframe(coupon_data, use_container_width=True)
         else:
-            st.warning(f"Aucun instrument trouvé avec INSTRID contenant '{search_instr}'")
+            st.warning(f"Aucun instrument trouvé avec Code ISIN contenant '{search_instr}'")
 
 # Nouvelle section d'onglets
 if st.session_state.step >= 4:
@@ -357,11 +395,11 @@ if st.session_state.step >= 4:
             
             # Instruments à maturité
             maturity_instruments = details.get('maturity_instruments', [])
-            maturity_ids = "\n".join(instr['INSTRID'] for instr in maturity_instruments) if maturity_instruments else ""
+            maturity_ids = "\n".join(instr['Code ISIN'] for instr in maturity_instruments) if maturity_instruments else ""
             
             # Instruments avec coupons
             coupon_instruments = details.get('coupon_instruments', [])
-            coupon_ids = "\n".join([instr['INSTRID'] for instr in coupon_instruments]) if coupon_instruments else ""
+            coupon_ids = "\n".join([instr['Code ISIN'] for instr in coupon_instruments]) if coupon_instruments else ""
             
             display_data.append({
                 "Mois/Année": month_name,
@@ -491,10 +529,10 @@ if st.session_state.step >= 4:
                     st.dataframe(maturity_df, hide_index=True, use_container_width=True)
                     
                     fig1 = px.bar(maturity_df, 
-                                  x='INSTRID', 
+                                  x='Code ISIN', 
                                   y='ISSUESIZE',
                                   title=f"Capital à échéance - {selected_month_str}",
-                                  labels={'ISSUESIZE': 'Montant', 'INSTRID': 'Instrument'})
+                                  labels={'ISSUESIZE': 'Montant', 'Code ISIN': 'Instrument'})
                     st.plotly_chart(fig1, use_container_width=True)
                 else:
                     st.info("Aucun instrument arrivant à échéance ce mois-ci")
@@ -507,10 +545,10 @@ if st.session_state.step >= 4:
                     st.dataframe(coupon_df, hide_index=True, use_container_width=True)
                     
                     fig2 = px.bar(coupon_df, 
-                                x='INSTRID', 
+                                x='Code ISIN', 
                                 y='CouponAmount',
                                 title=f"Coupons versés - {selected_month_str}",
-                                labels={'CouponAmount': 'Montant', 'INSTRID': 'Instrument'})
+                                labels={'CouponAmount': 'Montant', 'Code ISIN': 'Instrument'})
                     st.plotly_chart(fig2, use_container_width=True)
                 else:
                     st.info("Aucun coupon versé ce mois-ci")
@@ -558,9 +596,9 @@ if st.session_state.step >= 3:
                         year_data.append({
                             'Date': f"01-{month:02d}-{year}",
                             'Type': 'Maturité',
-                            'INSTRID': instr['INSTRID'],
+                            'Code ISIN': instr['Code ISIN'],
                             'Montant': instr['ISSUESIZE'],
-                            'Date Flux': instr['MATURITYDT']
+                            'Date Flux': instr["Date d'échéance"]
                         })
                     
                     # Instruments avec coupons
@@ -569,7 +607,7 @@ if st.session_state.step >= 3:
                         year_data.append({
                             'Date': f"01-{month:02d}-{year}",
                             'Type': 'Coupon',
-                            'INSTRID': instr['INSTRID'],
+                            'Code ISIN': instr['Code ISIN'],
                             'Montant': instr['CouponAmount'],
                             'Date Flux': instr['CouponDate']
                         })
