@@ -89,6 +89,8 @@ def preprocess_bond_data(df):
     # Ajout de la colonne ISSUESIZE (Encours / PARVALUE)
     if 'ENCOURS' in df_processed.columns and 'PARVALUE' in df_processed.columns:
         df_processed['ISSUESIZE'] = df_processed['ENCOURS'] / df_processed['PARVALUE']
+    else:
+        st.warning(f"Colonnes manquantes pour calculer ISSUESIZE: ENCOURS={ 'ENCOURS' in df_processed.columns}, PARVALUE={ 'PARVALUE' in df_processed.columns}")
     
     # Ajout de la colonne INTERESTPERIODCTY basée sur la maturité
     def determine_interest_period(maturite):
@@ -169,8 +171,14 @@ if st.sidebar.button("1. Charger et prétraiter les données") and uploaded_file
         # Chargement des données
         st.session_state.raw_data = pd.read_excel(uploaded_file)
         
+        # Afficher les colonnes originales pour debug
+        st.sidebar.info(f"Colonnes originales: {list(st.session_state.raw_data.columns)}")
+        
         # Prétraitement des données
         st.session_state.processed_data = preprocess_bond_data(st.session_state.raw_data)
+        
+        # Afficher les colonnes après prétraitement pour debug
+        st.sidebar.info(f"Colonnes après prétraitement: {list(st.session_state.processed_data.columns)}")
         
         # Vérification des colonnes requises
         required_cols = ['INSTRID', 'ISSUEDT', 'MATURITYDT_L', 'INTERESTPERIODCTY', 'ISSUESIZE', 'INTERESTRATE']
@@ -178,6 +186,12 @@ if st.sidebar.button("1. Charger et prétraiter les données") and uploaded_file
         
         if missing:
             st.sidebar.error(f"Colonnes manquantes après prétraitement: {', '.join(missing)}")
+            # Afficher les données pour debug
+            st.subheader("Données brutes (pour debug)")
+            st.dataframe(st.session_state.raw_data.head(), use_container_width=True)
+            
+            st.subheader("Données prétraitées (pour debug)")
+            st.dataframe(st.session_state.processed_data.head(), use_container_width=True)
         else:
             # Suppression des doublons basée sur INSTRID (garder la première occurrence)
             st.session_state.processed_data = st.session_state.processed_data.drop_duplicates(subset=['INSTRID'], keep='first')
@@ -196,6 +210,8 @@ if st.sidebar.button("1. Charger et prétraiter les données") and uploaded_file
             
     except Exception as e:
         st.sidebar.error(f"Erreur: {str(e)}")
+        import traceback
+        st.error(f"Traceback: {traceback.format_exc()}")
 
 if st.sidebar.button("2. Calculer les coupons") and st.session_state.step >= 2:
     try:
@@ -734,3 +750,4 @@ if st.session_state.step >= 2:
 # Message initial
 if st.session_state.step == 0:
     st.info("Veuillez télécharger un fichier Excel et suivre les étapes du processus.")
+
