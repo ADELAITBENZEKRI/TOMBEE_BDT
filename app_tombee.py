@@ -122,9 +122,9 @@ if st.sidebar.button("3. Calculer les coupons") and st.session_state.step >= 2:
             if freq == "ANLY":
                 return row["AnnualCouponAmount"]
             elif freq == "HFLY":
-                return row["AnnualCouponAmount"] / 2
+                return row["AnnualCouponAmount"] # / 2
             elif freq == "QTLY":
-                return row["AnnualCouponAmount"] / 4
+                return row["AnnualCouponAmount"] # / 4
             else:
                 return row["AnnualCouponAmount"]
         
@@ -644,4 +644,5 @@ if st.session_state.step >= 3:
 
 # Message initial
 if st.session_state.step == 0:
+
     st.info("Veuillez télécharger un fichier Excel et suivre les étapes du processus.")
