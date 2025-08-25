@@ -64,8 +64,8 @@ def determine_interest_periodicity(maturity_text):
 
 def calculate_coupon_dates(row):
     try:
-        issue_date = pd.to_datetime(row["Date d'émission"], errors='coerce')
-        maturity_date = pd.to_datetime(row["Date d'échéance"], errors='coerce')
+        issue_date = pd.to_datetime(row["Date d'&eacute;mission"], errors='coerce')
+        maturity_date = pd.to_datetime(row["Date d'&eacute;ch&eacute;ance"], errors='coerce')
         
         if pd.isna(issue_date) or pd.isna(maturity_date):
             return [maturity_date]
@@ -114,7 +114,7 @@ if st.sidebar.button("2. Prétraiter les données") and st.session_state.step >=
         df = st.session_state.raw_data.copy()
         
         # Vérifier les colonnes requises
-        required_cols = ['Code ISIN', "Date d'émission", "Date d'échéance", 'Encours', 'Taux Nominal %', 'Valeur Nominale']
+        required_cols = ['Code ISIN', "Date d'&eacute;mission", "Date d'&eacute;ch&eacute;ance", 'Encours', 'Taux Nominal %', 'Valeur Nominale ']
         missing = [col for col in required_cols if col not in df.columns]
         
         if missing:
@@ -133,7 +133,7 @@ if st.sidebar.button("2. Prétraiter les données") and st.session_state.step >=
             df['Valeur Nominale'] = df['Valeur Nominale'].replace({',': '.'}, regex=True).astype(float)
             
             # Calculer ISSUESIZE = Encours / Valeur Nominale * 100000
-            df['ISSUESIZE'] = (df['Encours'] / df['Valeur Nominale']) * 100000
+            df['ISSUESIZE'] = (df['Encours'] / df['Valeur Nominale ']) * 100000
             
             # Déterminer la périodicité des intérêts
             df['INTERESTPERIODCTY'] = df['Maturité'].apply(determine_interest_periodicity)
@@ -683,3 +683,4 @@ if st.session_state.step >= 3:
 # Message initial
 if st.session_state.step == 0:
     st.info("Veuillez télécharger un fichier Excel et suivre les étapes du processus.")
+
