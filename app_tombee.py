@@ -25,7 +25,69 @@ if 'raw_results' not in st.session_state:
     st.session_state.raw_results = None
 if 'instruments_details' not in st.session_state:
     st.session_state.instruments_details = None
+####
+# Fonction de prétraitement
+def preprocess_bond_data(df):
+    """
+    Prétraite les données d'obligations avec les transformations spécifiées
+    
+    Args:
+        df (DataFrame): DataFrame contenant les données brutes
+        
+    Returns:
+        DataFrame: DataFrame prétraité avec les nouvelles colonnes
+    """
+    
+    # Copie du DataFrame pour éviter les modifications sur l'original
+    df_processed = df.copy()
+    
+    # Renommage des colonnes
+    rename_dict = {
+        'Code ISIN': 'INSTRID',
+        'Maturit&eacute;': 'Maturite',
+        'Date d\'&eacute;mission': 'ISSUEDT',
+        'Date d\'&eacute;ch&eacute;ance': 'MATURITYDT_L',
+        'Valeur Nominale': 'PARVALUE',
+        'Taux Nominal %': 'INTERESTRATE'
+    }
+    
+    df_processed = df_processed.rename(columns=rename_dict)
+    
+    # Conversion de la colonne PARVALUE en numérique (enlever les espaces)
+    if 'PARVALUE' in df_processed.columns:
+        df_processed['PARVALUE'] = df_processed['PARVALUE'].astype(str).str.replace(' ', '').str.replace(',', '.').astype(float)
+    
+    # Conversion de la colonne Encours en numérique (enlever les espaces et la virgule décimale)
+    if 'Encours' in df_processed.columns:
+        df_processed['Encours'] = df_processed['Encours'].astype(str).str.replace(' ', '').str.replace(',', '.').astype(float)
+    
+    # Ajout de la colonne ISSUESIZE (Encours / PARVALUE)
+    if 'Encours' in df_processed.columns and 'PARVALUE' in df_processed.columns:
+        df_processed['ISSUESIZE'] = df_processed['Encours'] / df_processed['PARVALUE']
+    
+    # Ajout de la colonne INTERESTPERIODCTY basée sur la maturité
+    def determine_interest_period(maturite):
+        if pd.isna(maturite):
+            return 'ANLY'
+            
+        maturite_str = str(maturite).lower()
+        
+        if 'semaine' in maturite_str:
+            if '26' in maturite_str or '52' in maturite_str:
+                return 'HFLY'  # Semi-annuel
+            elif '13' in maturite_str:
+                return 'QTLY'  # Trimestriel
+        elif any(keyword in maturite_str for keyword in ['an', 'ans', 'année', 'années']):
+            return 'ANLY'  # Annuel
+        
+        return 'ANLY'  # Par défaut
+    
+    if 'Maturite' in df_processed.columns:
+        df_processed['INTERESTPERIODCTY'] = df_processed['Maturite'].apply(determine_interest_period)
+    
+    return df_processed
 
+######
 # Fonctions utilitaires
 def number_to_text(value):
     value = abs(value)
@@ -646,3 +708,4 @@ if st.session_state.step >= 3:
 if st.session_state.step == 0:
 
     st.info("Veuillez télécharger un fichier Excel et suivre les étapes du processus.")
+
