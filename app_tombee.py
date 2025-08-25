@@ -27,6 +27,31 @@ if 'raw_results' not in st.session_state:
 if 'instruments_details' not in st.session_state:
     st.session_state.instruments_details = None
 
+# Fonction pour nettoyer les nombres avec espaces
+def clean_numeric_value(value):
+    """Nettoie les valeurs numériques en supprimant les espaces et en convertissant les virgules en points"""
+    if pd.isna(value):
+        return value
+    
+    if isinstance(value, (int, float)):
+        return value
+    
+    # Convertir en chaîne et nettoyer
+    value_str = str(value).strip()
+    
+    # Supprimer tous les espaces (y compris les espaces insécables)
+    value_str = value_str.replace(' ', '').replace('\u202f', '').replace('\xa0', '')
+    
+    # Remplacer les virgules par des points pour les décimales
+    value_str = value_str.replace(',', '.')
+    
+    try:
+        # Essayer de convertir en float
+        return float(value_str)
+    except ValueError:
+        # Si la conversion échoue, retourner la valeur originale
+        return value
+
 # Fonction de prétraitement
 def preprocess_bond_data(df):
     """
@@ -49,22 +74,21 @@ def preprocess_bond_data(df):
         'Date d\'&eacute;mission': 'ISSUEDT',
         'Date d\'&eacute;ch&eacute;ance': 'MATURITYDT_L',
         'Valeur Nominale': 'PARVALUE',
-        'Taux Nominal %': 'INTERESTRATE'
+        'Taux Nominal %': 'INTERESTRATE',
+        'Encours': 'ENCOURS'
     }
     
     df_processed = df_processed.rename(columns=rename_dict)
     
-    # Conversion de la colonne PARVALUE en numérique (enlever les espaces)
-    if 'PARVALUE' in df_processed.columns:
-        df_processed['PARVALUE'] = df_processed['PARVALUE'].astype(str).str.replace(' ', '').str.replace(',', '.').astype(float)
-    
-    # Conversion de la colonne Encours en numérique (enlever les espaces et la virgule décimale)
-    if 'Encours' in df_processed.columns:
-        df_processed['Encours'] = df_processed['Encours'].astype(str).str.replace(' ', '').str.replace(',', '.').astype(float)
+    # Nettoyage des valeurs numériques (suppression des espaces)
+    numeric_columns = ['PARVALUE', 'ENCOURS', 'INTERESTRATE', 'Prix', 'Coupon Couru Unitaire']
+    for col in numeric_columns:
+        if col in df_processed.columns:
+            df_processed[col] = df_processed[col].apply(clean_numeric_value)
     
     # Ajout de la colonne ISSUESIZE (Encours / PARVALUE)
-    if 'Encours' in df_processed.columns and 'PARVALUE' in df_processed.columns:
-        df_processed['ISSUESIZE'] = df_processed['Encours'] / df_processed['PARVALUE']
+    if 'ENCOURS' in df_processed.columns and 'PARVALUE' in df_processed.columns:
+        df_processed['ISSUESIZE'] = df_processed['ENCOURS'] / df_processed['PARVALUE']
     
     # Ajout de la colonne INTERESTPERIODCTY basée sur la maturité
     def determine_interest_period(maturite):
@@ -195,7 +219,7 @@ if st.sidebar.button("2. Calculer les coupons") and st.session_state.step >= 2:
         max_coupons = max(df["CouponPayDate"].apply(len)) if not df["CouponPayDate"].empty else 0
         for i in range(max_coupons):
             df[f"CouponPayDate_{i+1}"] = df["CouponPayDate"].apply(lambda x: x[i] if i < len(x) else pd.NaT)
-            df[f"CouponAmount_{i+1}"] = df.apply(lambda row: calculate_coupon_amount(row, row[f"CoutonPayDate_{i+1}"]), axis=1)
+            df[f"CouponAmount_{i+1}"] = df.apply(lambda row: calculate_coupon_amount(row, row[f"CouponPayDate_{i+1}"]), axis=1)
         
         date_cols = [col for col in df.columns if "CouponPayDate" in col]
         for col in date_cols:
