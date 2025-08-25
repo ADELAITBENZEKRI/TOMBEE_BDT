@@ -11,7 +11,7 @@ import re
 st.set_page_config(page_title="Tableau de Bord d'Analyse des BDT", layout="wide")
 
 # Titre
-st.title("Tableau de Bord d'Analyse des BDT")
+st.title("Tableau de Bord d'Analyse des Obligations")
 
 # Initialisation de l'état de la session
 if 'raw_data' not in st.session_state:
@@ -75,7 +75,16 @@ def preprocess_bond_data(df):
     
     # Ajout de la colonne ISSUESIZE (Encours / Valeur Nominale)
     if 'Encours' in df_processed.columns and 'Valeur Nominale' in df_processed.columns:
-        df_processed['ISSUESIZE'] = df_processed['Encours'] / 100000
+        # Vérifier que les colonnes contiennent des valeurs numériques valides
+        df_processed['ISSUESIZE'] = df_processed.apply(
+            lambda row: row['Encours'] / row['Valeur Nominale'] 
+            if pd.notna(row['Encours']) and pd.notna(row['Valeur Nominale']) and row['Valeur Nominale'] != 0
+            else 0, 
+            axis=1
+        )
+    else:
+        st.warning("Colonnes 'Encours' ou 'Valeur Nominale' manquantes - ISSUESIZE ne peut pas être calculé")
+        df_processed['ISSUESIZE'] = 0
     
     # Ajout de la colonne INTERESTPERIODCTY basée sur la maturité
     def determine_interest_period(maturite):
@@ -96,6 +105,9 @@ def preprocess_bond_data(df):
     
     if 'Maturit&eacute;' in df_processed.columns:
         df_processed['INTERESTPERIODCTY'] = df_processed['Maturit&eacute;'].apply(determine_interest_period)
+    else:
+        st.warning("Colonne 'Maturit&eacute;' manquante - INTERESTPERIODCTY ne peut pas être calculé")
+        df_processed['INTERESTPERIODCTY'] = 'ANLY'
     
     return df_processed
 
@@ -184,7 +196,12 @@ if st.sidebar.button("1. Charger et prétraiter les données") and uploaded_file
             # Conversion des types de données
             st.session_state.processed_data["Date d'&eacute;ch&eacute;ance"] = pd.to_datetime(st.session_state.processed_data["Date d'&eacute;ch&eacute;ance"], errors='coerce')
             st.session_state.processed_data["Date d'&eacute;mission"] = pd.to_datetime(st.session_state.processed_data["Date d'&eacute;mission"], errors='coerce')
-            st.session_state.processed_data['ISSUESIZE'] = pd.to_numeric(st.session_state.processed_data['ISSUESIZE'], errors='coerce') * 100_000
+            
+            # Vérifier que ISSUESIZE est numérique
+            st.session_state.processed_data['ISSUESIZE'] = pd.to_numeric(st.session_state.processed_data['ISSUESIZE'], errors='coerce')
+            
+            # Multiplier par 100,000 comme spécifié
+            st.session_state.processed_data['ISSUESIZE'] = st.session_state.processed_data['ISSUESIZE'] * 100_000
             
             st.session_state.step = 2
             st.sidebar.success("Chargement et prétraitement réussis! Doublons supprimés.")
@@ -317,7 +334,7 @@ if st.sidebar.button("3. Analyser les résultats") and st.session_state.step >= 
         
         for month_year in results:
             results[month_year]['instruments'] = list(results[month_year]['instruments'])
-            results[month_year]['coupon_instruments'] = list(results[month_year]['coupon_instruments'])
+            results[month_year]['couton_instruments'] = list(results[month_year]['coupon_instruments'])
         
         sorted_results = sorted(results.items(), key=lambda x: (x[0][1], x[0][0]))
         filtered_results = [(m_y, data) for m_y, data in sorted_results 
@@ -735,5 +752,3 @@ if st.session_state.step >= 2:
 # Message initial
 if st.session_state.step == 0:
     st.info("Veuillez télécharger un fichier Excel et suivre les étapes du processus.")
-
-
