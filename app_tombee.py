@@ -11,7 +11,7 @@ import re
 st.set_page_config(page_title="Tableau de Bord d'Analyse des BDT", layout="wide")
 
 # Titre
-st.title("Tableau de Bord d'Analyse des Obligations")
+st.title("Tableau de Bord d'Analyse des BDT")
 
 # Initialisation de l'état de la session
 if 'raw_data' not in st.session_state:
@@ -735,3 +735,4 @@ if st.session_state.step >= 2:
 # Message initial
 if st.session_state.step == 0:
     st.info("Veuillez télécharger un fichier Excel et suivre les étapes du processus.")
+
