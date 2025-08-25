@@ -75,7 +75,7 @@ def preprocess_bond_data(df):
     
     # Ajout de la colonne ISSUESIZE (Encours / Valeur Nominale)
     if 'Encours' in df_processed.columns and 'Valeur Nominale' in df_processed.columns:
-        df_processed['ISSUESIZE'] = df_processed['Encours'] / df_processed['Valeur Nominale']
+        df_processed['ISSUESIZE'] = df_processed['Encours'] / 100000
     
     # Ajout de la colonne INTERESTPERIODCTY basée sur la maturité
     def determine_interest_period(maturite):
@@ -735,4 +735,5 @@ if st.session_state.step >= 2:
 # Message initial
 if st.session_state.step == 0:
     st.info("Veuillez télécharger un fichier Excel et suivre les étapes du processus.")
+
 
