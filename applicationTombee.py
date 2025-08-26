@@ -11,7 +11,7 @@ import numpy as np
 st.set_page_config(page_title="Tableau de Bord d'Analyse des BDT", layout="wide")
 
 # Titre
-st.title("Tableau de Bord d'Analyse des Obligations")
+st.title("Tableau de Bord d'Analyse des BDT")
 
 # Initialisation de l'état de la session
 if 'raw_data' not in st.session_state:
@@ -124,8 +124,8 @@ if st.sidebar.button("2. Prétraiter les données") and st.session_state.step >=
             df = df.drop_duplicates(subset=['Code ISIN'], keep='first')
             
             # Conversion des types de données
-            df["Date d'échéance"] = pd.to_datetime(df["Date d'échéance"], errors='coerce')
-            df["Date d'émission"] = pd.to_datetime(df["Date d'émission"], errors='coerce')
+            df["Date d'&eacute;ch&eacute;ance"] = pd.to_datetime(df["Date d'&eacute;ch&eacute;ance"], errors='coerce')
+            df["Date d'&eacute;mission"] = pd.to_datetime(df["Date d'&eacute;mission"], errors='coerce')
             
             # Nettoyer et convertir les colonnes numériques
             df['Encours'] = df['Encours'].replace({',': '.'}, regex=True).astype(float)
@@ -509,7 +509,7 @@ if st.session_state.step >= 4:
                                 y='Montant',
                                 color='Couleur',
                                 title=f"Flux financiers - {selected_month_str}",
-                                labels={'Montant': 'Montant (€)', 'Type': ''},
+                                labels={'Montant': 'Montant (MAD)', 'Type': ''},
                                 text=[format_amount(x) for x in flux_data['Montant']])
                 
                 fig_flux.update_traces(textposition='outside',
@@ -683,4 +683,5 @@ if st.session_state.step >= 3:
 # Message initial
 if st.session_state.step == 0:
     st.info("Veuillez télécharger un fichier Excel et suivre les étapes du processus.")
+
 
