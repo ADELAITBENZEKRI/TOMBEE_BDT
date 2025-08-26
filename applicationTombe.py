@@ -5,14 +5,13 @@ import calendar
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from io import BytesIO
-import numpy as np
 import re
 
 # Configuration de la page
 st.set_page_config(page_title="Tableau de Bord d'Analyse des BDT", layout="wide")
 
 # Titre
-st.title("Tableau de Bord d'Analyse des BDT")
+st.title("Tableau de Bord d'Analyse des Obligations")
 
 # Initialisation de l'état de la session
 if 'raw_data' not in st.session_state:
@@ -41,32 +40,37 @@ def number_to_text(value):
 def format_amount(value):
     return f"{value:,.2f} ({number_to_text(value)})"
 
-def determine_interest_periodicity(maturity_text):
-    """Détermine la périodicité des intérêts basée sur le texte de maturité"""
-    if pd.isna(maturity_text):
+def clean_numeric_value(value):
+    """Nettoie les valeurs numériques avec des espaces et des virgules"""
+    if isinstance(value, str):
+        # Supprimer les espaces et remplacer les virgules par des points
+        value = value.replace(' ', '').replace(',', '.')
+        # Extraire uniquement les chiffres, points et signes négatifs
+        value = re.sub(r'[^\d.-]', '', value)
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return 0.0
+
+def determine_interest_periodicity(maturity_str):
+    """Détermine la périodicité des intérêts basée sur la maturité"""
+    if 'ans' in maturity_str.lower() or 'ann' in maturity_str.lower() or 'an' in maturity_str.lower():
         return "ANLY"
-    
-    maturity_text = str(maturity_text).lower()
-    
-    if "année" in maturity_text or "ans" in maturity_text or "an" in maturity_text:
+    elif '52 semaines' in maturity_str.lower() or '52 sem' in maturity_str.lower():
         return "ANLY"
-    elif "semaine" in maturity_text or "semaines" in maturity_text:
-        if "26" in maturity_text:
-            return "HFLY"
-        elif "13" in maturity_text:
-            return "QTLY"
-        elif "52" in maturity_text:
-            return "ANLY"
-    elif "trimestre" in maturity_text:
+    elif '26 semaines' in maturity_str.lower() or '26 sem' in maturity_str.lower():
+        return "HFLY"
+    elif '13 semaines' in maturity_str.lower() or '13 sem' in maturity_str.lower():
         return "QTLY"
-    
-    # Par défaut, on considère que c'est annuel
-    return "ANLY"
+    elif 'semaines' in maturity_str.lower() or 'sem' in maturity_str.lower():
+        return "QTLY"  # Par défaut pour les autres semaines
+    else:
+        return "ANLY"  # Par défaut annuel
 
 def calculate_coupon_dates(row):
     try:
-        issue_date = pd.to_datetime(row["Date d'&eacute;mission"], errors='coerce')
-        maturity_date = pd.to_datetime(row["Date d'&eacute;ch&eacute;ance"], errors='coerce')
+        issue_date = pd.to_datetime(row["ISSUEDT"], errors='coerce')
+        maturity_date = pd.to_datetime(row["MATURITYDT_L"], errors='coerce')
         
         if pd.isna(issue_date) or pd.isna(maturity_date):
             return [maturity_date]
@@ -75,27 +79,36 @@ def calculate_coupon_dates(row):
         coupon_dates = []
 
         if frequency == "ANLY":
-            first_coupon = maturity_date.replace(year=issue_date.year + 1)
-            
-            if first_coupon < maturity_date:
-                current_date = first_coupon
-                previous_year = None
-                
-                while current_date <= maturity_date:
-                    current_year = current_date.year
-                    if current_year != previous_year:
-                        coupon_dates.append(current_date)
-                        previous_year = current_year
-                    current_date += relativedelta(years=1)
-            
-            if not coupon_dates or coupon_dates[-1].year != maturity_date.year:
-                coupon_dates.append(maturity_date)
+            # Pour les paiements annuels
+            current_date = issue_date
+            while current_date < maturity_date:
+                next_date = current_date + relativedelta(years=1)
+                if next_date <= maturity_date:
+                    coupon_dates.append(next_date)
+                current_date = next_date
+        elif frequency == "HFLY":
+            # Pour les paiements semestriels
+            current_date = issue_date
+            while current_date < maturity_date:
+                next_date = current_date + relativedelta(months=6)
+                if next_date <= maturity_date:
+                    coupon_dates.append(next_date)
+                current_date = next_date
+        elif frequency == "QTLY":
+            # Pour les paiements trimestriels
+            current_date = issue_date
+            while current_date < maturity_date:
+                next_date = current_date + relativedelta(months=3)
+                if next_date <= maturity_date:
+                    coupon_dates.append(next_date)
+                current_date = next_date
         else:
+            # Par défaut, seulement à l'échéance
             coupon_dates.append(maturity_date)
 
         return coupon_dates
     except Exception as e:
-        st.error(f"Erreur pour l'instrument {row.get('Code ISIN', 'inconnu')}: {str(e)}")
+        st.error(f"Erreur pour l'instrument {row.get('INSTRID', 'inconnu')}: {str(e)}")
         return [maturity_date]
 
 # Interface utilisateur
@@ -114,44 +127,42 @@ if st.sidebar.button("2. Prétraiter les données") and st.session_state.step >=
     try:
         df = st.session_state.raw_data.copy()
         
-        # Vérifier les colonnes requises
-        required_cols = ['Code ISIN', "Date d'&eacute;mission", "Date d'&eacute;ch&eacute;ance", 'Encours', 'Taux Nominal %', 'Valeur Nominale ']
+        # Renommer les colonnes pour correspondre au format attendu
+        column_mapping = {
+            'Code ISIN': 'INSTRID',
+            'Date d\'émission': 'ISSUEDT',
+            'Date d\'échéance': 'MATURITYDT_L',
+            'Taux Nominal %': 'INTERESTRATE',
+            'Valeur Nominale': 'FACEVALUE',
+            'Encours': 'ISSUESIZE'
+        }
+        
+        df = df.rename(columns=column_mapping)
+        
+        # Vérifier que les colonnes requises existent
+        required_cols = ['INSTRID', 'ISSUEDT', 'MATURITYDT_L', 'ISSUESIZE', 'INTERESTRATE']
         missing = [col for col in required_cols if col not in df.columns]
         
         if missing:
             st.sidebar.error(f"Colonnes manquantes: {', '.join(missing)}")
         else:
-            # Suppression des doublons basée sur Code ISIN (garder la première occurrence)
-            df = df.drop_duplicates(subset=['Code ISIN'], keep='first')
+            # Suppression des doublons basée sur INSTRID (garder la première occurrence)
+            df = df.drop_duplicates(subset=['INSTRID'], keep='first')
+            
+            # Nettoyer les valeurs numériques
+            df['ISSUESIZE'] = df['ISSUESIZE'].apply(clean_numeric_value)
+            df['INTERESTRATE'] = df['INTERESTRATE'].apply(clean_numeric_value)
+            
+            # Ajouter la colonne INTERESTPERIODCTY basée sur la maturité
+            if 'Maturité' in df.columns:
+                df['INTERESTPERIODCTY'] = df['Maturité'].apply(determine_interest_periodicity)
+            else:
+                # Si la colonne Maturité n'existe pas, utiliser une valeur par défaut
+                df['INTERESTPERIODCTY'] = 'ANLY'
             
             # Conversion des types de données
-            df["Date d'&eacute;ch&eacute;ance"] = pd.to_datetime(df["Date d'&eacute;ch&eacute;ance"], errors='coerce')
-            df["Date d'&eacute;mission"] = pd.to_datetime(df["Date d'&eacute;mission"], errors='coerce')
-            
-            # Nettoyer et convertir les colonnes numériques
-            def clean_numeric_string(value):
-                if pd.isna(value):
-                    return value
-                if isinstance(value, str):
-                    # Supprimer tous les caractères non numériques sauf le point et la virgule
-                    value = re.sub(r'[^\d.,]', '', value)
-                    # Remplacer la virgule par un point pour la conversion float
-                    value = value.replace(',', '.')
-                return value
-            
-            # Appliquer le nettoyage
-            df['Encours'] = df['Encours'].apply(clean_numeric_string).astype(float)
-            df['Taux Nominal %'] = df['Taux Nominal %'].apply(clean_numeric_string).astype(float)
-            df['Valeur Nominale '] = df['Valeur Nominale '].apply(clean_numeric_string).astype(float)
-            
-            # Calculer ISSUESIZE = Encours / Valeur Nominale * 100000
-            df['ISSUESIZE'] = (df['Encours'] / df['Valeur Nominale ']) * 100000
-            
-            # Déterminer la périodicité des intérêts
-            df['INTERESTPERIODCTY'] = df['Maturité'].apply(determine_interest_periodicity)
-            
-            # Ajouter la colonne INTERESTRATE
-            df['INTERESTRATE'] = df['Taux Nominal %']
+            df['MATURITYDT_L'] = pd.to_datetime(df['MATURITYDT_L'], errors='coerce')
+            df['ISSUEDT'] = pd.to_datetime(df['ISSUEDT'], errors='coerce')
             
             st.session_state.processed_data = df
             st.session_state.step = 2
@@ -521,7 +532,7 @@ if st.session_state.step >= 4:
                                 y='Montant',
                                 color='Couleur',
                                 title=f"Flux financiers - {selected_month_str}",
-                                labels={'Montant': 'Montant (MAD)', 'Type': ''},
+                                labels={'Montant': 'Montant (€)', 'Type': ''},
                                 text=[format_amount(x) for x in flux_data['Montant']])
                 
                 fig_flux.update_traces(textposition='outside',
@@ -695,6 +706,3 @@ if st.session_state.step >= 3:
 # Message initial
 if st.session_state.step == 0:
     st.info("Veuillez télécharger un fichier Excel et suivre les étapes du processus.")
-
-
-
