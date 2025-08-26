@@ -6,6 +6,7 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from io import BytesIO
 import numpy as np
+import re
 
 # Configuration de la page
 st.set_page_config(page_title="Tableau de Bord d'Analyse des BDT", layout="wide")
@@ -128,9 +129,20 @@ if st.sidebar.button("2. Prétraiter les données") and st.session_state.step >=
             df["Date d'&eacute;mission"] = pd.to_datetime(df["Date d'&eacute;mission"], errors='coerce')
             
             # Nettoyer et convertir les colonnes numériques
-            df['Encours'] = df['Encours'].replace({',': '.'}, regex=True).astype(float)
-            df['Taux Nominal %'] = df['Taux Nominal %'].replace({',': '.'}, regex=True).astype(float)
-            df['Valeur Nominale'] = df['Valeur Nominale'].replace({',': '.'}, regex=True).astype(float)
+            def clean_numeric_string(value):
+                if pd.isna(value):
+                    return value
+                if isinstance(value, str):
+                    # Supprimer tous les caractères non numériques sauf le point et la virgule
+                    value = re.sub(r'[^\d.,]', '', value)
+                    # Remplacer la virgule par un point pour la conversion float
+                    value = value.replace(',', '.')
+                return value
+            
+            # Appliquer le nettoyage
+            df['Encours'] = df['Encours'].apply(clean_numeric_string).astype(float)
+            df['Taux Nominal %'] = df['Taux Nominal %'].apply(clean_numeric_string).astype(float)
+            df['Valeur Nominale '] = df['Valeur Nominale '].apply(clean_numeric_string).astype(float)
             
             # Calculer ISSUESIZE = Encours / Valeur Nominale * 100000
             df['ISSUESIZE'] = (df['Encours'] / df['Valeur Nominale ']) * 100000
@@ -683,5 +695,6 @@ if st.session_state.step >= 3:
 # Message initial
 if st.session_state.step == 0:
     st.info("Veuillez télécharger un fichier Excel et suivre les étapes du processus.")
+
 
 
